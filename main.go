@@ -29,7 +29,7 @@ func main() {
 	appTransport, err := ghinstallation.NewKeyFromFile(http.DefaultTransport, conf.GHAppID, conf.GHAppInstallationID, conf.GHAppKeyPath)
 	appClient := github.NewClient(&http.Client{Transport: appTransport})
 
-	http.HandleFunc("/", handleRedirect(conf.GHOauthID))
+	http.HandleFunc("/link", handleLink(conf.GHOauthID))
 	http.HandleFunc("/authorize", handleAuthorize(conf.GHOauthID, conf.GHOAuthSecret, appClient))
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
@@ -88,9 +88,9 @@ type Config struct {
 	GHAppKeyPath        string
 }
 
-func handleRedirect(ghClientID string) func(w http.ResponseWriter, r *http.Request) {
+func handleLink(ghClientID string) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		log.Println("Redirecting a new request for authorisation")
+		log.Println("Redirecting a new request for linking")
 
 		http.Redirect(w, r, fmt.Sprintf("https://github.com/login/oauth/authorize?%s", url.Values{
 			"client_id": []string{ghClientID},
