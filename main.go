@@ -38,10 +38,7 @@ func main() {
 }
 
 func getConfigFromEnv() (Config, error) {
-	err := godotenv.Load()
-	if err != nil {
-		return Config{}, errors.Errorf("Error loading .env: %w", err)
-	}
+	_ = godotenv.Load()
 
 	ghOAuthID, ok := os.LookupEnv("GITHUB_OAUTH_ID")
 	if !ok {
