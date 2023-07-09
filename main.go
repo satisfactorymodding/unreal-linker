@@ -116,7 +116,7 @@ func handleLink(ghClientID string) http.HandlerFunc {
 
 		http.Redirect(w, r, fmt.Sprintf("https://github.com/login/oauth/authorize?%s", url.Values{
 			"client_id": []string{ghClientID},
-			"scope":     []string{string(github.ScopeRepo)},
+			"scope":     []string{string(github.ScopeReadOrg)},
 		}.Encode()), http.StatusSeeOther)
 	}
 }
@@ -195,7 +195,7 @@ func getAccessToken(code, ghClientID, ghClientSecret string) (string, error) {
 func isUserInEpicOrg(client *github.Client) (bool, error) {
 	ctx := context.Background()
 
-	_, _, err := client.Repositories.Get(ctx, "SatisfactoryModdingUE", "UnrealEngine")
+	_, _, err := client.Teams.GetTeamBySlug(ctx, "EpicGames", "developers")
 	if err, ok := err.(*github.ErrorResponse); ok { // We rely on an implementation bug to check if the user can access a repo
 		if err.Response.StatusCode == 404 {
 			return false, nil
