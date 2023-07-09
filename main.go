@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 )
 
 func main() {
@@ -90,6 +91,12 @@ type Config struct {
 
 func handleLink(ghClientID string) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		if strings.Contains(r.UserAgent(), "bot") {
+			return
+		}
+
 		log.Println("Redirecting a new request for linking")
 
 		http.Redirect(w, r, fmt.Sprintf("https://github.com/login/oauth/authorize?%s", url.Values{
