@@ -30,8 +30,8 @@ func main() {
 	appTransport, err := ghinstallation.NewKeyFromFile(http.DefaultTransport, conf.GHAppID, conf.GHAppInstallationID, conf.GHAppKeyPath)
 	appClient := github.NewClient(&http.Client{Transport: appTransport})
 
-	http.HandleFunc("/link", handleLink(conf.GHOauthID))
-	http.HandleFunc("/authorize", handleAuthorize(conf.GHOauthID, conf.GHOAuthSecret, appClient))
+	http.HandleFunc("/link", handlePanicHTTP(handleLink(conf.GHOauthID)))
+	http.HandleFunc("/authorize", handlePanicHTTP(handleAuthorize(conf.GHOauthID, conf.GHOAuthSecret, appClient)))
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		log.Fatal(err)
@@ -89,7 +89,22 @@ type Config struct {
 	GHAppKeyPath        string
 }
 
-func handleLink(ghClientID string) func(w http.ResponseWriter, r *http.Request) {
+func handlePanicHTTP(handlerFunc http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			err := recover()
+			if err == nil {
+				return
+			}
+			log.Printf("HTTP request panicked: %v", err)
+			http.Error(w, fmt.Sprintf("Panicked: %v", err), 500)
+		}()
+
+		handlerFunc(w, r)
+	}
+}
+
+func handleLink(ghClientID string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -106,7 +121,7 @@ func handleLink(ghClientID string) func(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client) func(w http.ResponseWriter, r *http.Request) {
+func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		err := r.ParseForm()
