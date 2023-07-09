@@ -145,7 +145,7 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 			return
 		}
 
-		log.Printf("User %s was in the EpicGames organisation\n", *user.Name)
+		log.Printf("User %s was in the EpicGames organisation\n", *user.Login)
 
 		err = addUserAsExternalCollaborator(appClient, *user.Login)
 		if err != nil {
