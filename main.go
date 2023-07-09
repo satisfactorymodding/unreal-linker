@@ -197,6 +197,8 @@ func isUserInEpicOrg(client *github.Client) (bool, error) {
 }
 
 func addUserAsExternalCollaborator(authenticatedClient *github.Client, user string) error {
-	_, _, err := authenticatedClient.Repositories.AddCollaborator(context.Background(), "SatisfactoryModding", "UnrealEngine", user, nil)
+	_, _, err := authenticatedClient.Repositories.AddCollaborator(context.Background(), "SatisfactoryModding", "UnrealEngine", user, &github.RepositoryAddCollaboratorOptions{
+		Permission: "pull",
+	})
 	return err
 }
