@@ -116,7 +116,7 @@ func handleLink(ghClientID string) http.HandlerFunc {
 
 		http.Redirect(w, r, fmt.Sprintf("https://github.com/login/oauth/authorize?%s", url.Values{
 			"client_id": []string{ghClientID},
-			"scope":     []string{string(github.ScopeReadOrg)},
+			"scope":     []string{string(github.ScopeRepo)},
 		}.Encode()), http.StatusSeeOther)
 	}
 }
@@ -142,6 +142,26 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 		tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})
 		client := github.NewClient(oauth2.NewClient(ctx, tokenSource))
 
+		hasAccess, err := hasUserRepoAccess(client)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error checking for repo access: %v", err), 500)
+			return
+		}
+		if hasAccess {
+			redirectToRepo(w, r)
+			return
+		}
+
+		accepted, err := acceptInvitationIfPresent(client)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error trying to accept the invitation: %v", err), 500)
+			return
+		}
+		if accepted {
+			redirectToRepo(w, r)
+			return
+		}
+
 		isInOrg, err := isUserInEpicOrg(client)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("error getting org status: %v", err), 500)
@@ -162,13 +182,19 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 
 		log.Printf("User %s was in the EpicGames organisation\n", *user.Login)
 
-		err = addUserAsExternalCollaborator(appClient, *user.Login)
+		err = sendCollaborationInvitation(appClient, *user.Login)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Could not add you as an external collaborator: %v", err), 500)
+			http.Error(w, fmt.Sprintf("Could not send you an invitation: %v", err), 500)
 			return
 		}
 
-		http.Redirect(w, r, "https://github.com/SatisfactoryModding/UnrealEngine", http.StatusSeeOther)
+		err = acceptInvitation(client)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error accepting the invitation: %v", err), 500)
+			return
+		}
+
+		redirectToRepo(w, r)
 	}
 }
 
@@ -195,7 +221,7 @@ func getAccessToken(code, ghClientID, ghClientSecret string) (string, error) {
 func isUserInEpicOrg(client *github.Client) (bool, error) {
 	ctx := context.Background()
 
-	_, _, err := client.Teams.GetTeamBySlug(ctx, "EpicGames", "developers")
+	_, _, err := client.Repositories.Get(ctx, "EpicGames", "UnrealEngine")
 	if err, ok := err.(*github.ErrorResponse); ok { // We rely on an implementation bug to check if the user can access a repo
 		if err.Response.StatusCode == 404 {
 			return false, nil
@@ -205,15 +231,78 @@ func isUserInEpicOrg(client *github.Client) (bool, error) {
 		}
 	}
 	if err != nil {
-		return false, errors.Wrap(err, "error getting org memberships")
+		return false, errors.Wrap(err, "error checking user's org membership")
 	}
 
 	return true, nil
 }
 
-func addUserAsExternalCollaborator(authenticatedClient *github.Client, user string) error {
+func hasUserRepoAccess(client *github.Client) (bool, error) {
+	ctx := context.Background()
+
+	_, _, err := client.Repositories.Get(ctx, "SatisfactoryModding", "UnrealEngine")
+	if err, ok := err.(*github.ErrorResponse); ok { // We rely on an implementation bug to check if the user can access a repo
+		if err.Response.StatusCode == 404 {
+			return false, nil
+		}
+		if err.Response.StatusCode == 403 {
+			return true, nil
+		}
+	}
+	if err != nil {
+		return false, errors.Wrap(err, "error checking user's repo access")
+	}
+
+	return true, nil
+}
+
+func acceptInvitationIfPresent(client *github.Client) (bool, error) {
+	ctx := context.Background()
+	invitations, _, err := client.Users.ListInvitations(ctx, nil)
+	if err, ok := err.(*github.ErrorResponse); ok { // We rely on an implementation bug to check if the user can access a repo
+		if err.Response.StatusCode == 404 {
+			return false, nil
+		}
+	}
+	if err != nil {
+		return false, errors.Wrap(err, "error listing collaboration invitations")
+	}
+	for _, invitation := range invitations {
+		repo := *invitation.Repo
+		if strings.ToLower(*repo.Owner.Login) != "satisfactorymodding" || *repo.Name != "UnrealEngine" {
+			continue
+		}
+		_, err = client.Users.AcceptInvitation(ctx, *invitation.ID)
+		if err != nil {
+			return false, errors.Wrap(err, "error accepting collaboration invitation")
+		}
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func acceptInvitation(client *github.Client) error {
+	accepted, err := acceptInvitationIfPresent(client)
+	if err != nil {
+		return err
+	}
+
+	if !accepted {
+		return errors.New("Could not find your invitation. Check your email to see if you received one.")
+	}
+
+	return nil
+}
+
+func sendCollaborationInvitation(authenticatedClient *github.Client, user string) error {
 	_, _, err := authenticatedClient.Repositories.AddCollaborator(context.Background(), "SatisfactoryModding", "UnrealEngine", user, &github.RepositoryAddCollaboratorOptions{
 		Permission: "pull",
 	})
+
 	return err
+}
+
+func redirectToRepo(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "https://github.com/SatisfactoryModding/UnrealEngine", http.StatusSeeOther)
 }
