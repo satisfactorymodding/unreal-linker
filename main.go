@@ -142,26 +142,40 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 		tokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})
 		client := github.NewClient(oauth2.NewClient(ctx, tokenSource))
 
+		log.Println("Getting authenticated user")
+		user, _, err := client.Users.Get(ctx, "")
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error getting authenticated user: %v", err), 500)
+			return
+		}
+		username := *user.Login
+
+		log.Printf("Checking if %v already has repo access\n", username)
+
 		hasAccess, err := hasUserRepoAccess(client)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Error checking for repo access: %v", err), 500)
 			return
 		}
 		if hasAccess {
+			log.Printf("%v has access to repo, redirecting\n", username)
 			redirectToRepo(w, r)
 			return
 		}
 
+		log.Printf("Trying to accept the invitation for %v if it exists\n", username)
 		accepted, err := acceptInvitationIfPresent(client)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Error trying to accept the invitation: %v", err), 500)
 			return
 		}
 		if accepted {
+			log.Printf("Was able to accept the invitation for %v, redirecting\n", username)
 			redirectToRepo(w, r)
 			return
 		}
 
+		log.Printf("Checking if %v is in the EpicGames org\n", username)
 		isInOrg, err := isUserInEpicOrg(client)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("error getting org status: %v", err), 500)
@@ -169,31 +183,28 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 		}
 
 		if !isInOrg {
-			log.Println("User was not in the EpicGames organisation")
+			log.Printf("%v was not in the EpicGames organisation\n", username)
 			http.Error(w, fmt.Sprintf("You are not in the EpicGames organisation. Please follow these directions and try again: https://www.unrealengine.com/en-US/ue-on-github"), 403)
 			return
 		}
 
-		user, _, err := client.Users.Get(ctx, "")
-		if err != nil {
-			http.Error(w, fmt.Sprintf("error getting authenticated user: %v", err), 500)
-			return
-		}
+		log.Printf("User %s was in the EpicGames organisation\n", username)
 
-		log.Printf("User %s was in the EpicGames organisation\n", *user.Login)
-
-		err = sendCollaborationInvitation(appClient, *user.Login)
+		log.Printf("Sending invitation for %v\n", username)
+		err = sendCollaborationInvitation(appClient, username)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Could not send you an invitation: %v", err), 500)
 			return
 		}
 
+		log.Printf("Accepting the invitation for %v\n", username)
 		err = acceptInvitation(client)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Error accepting the invitation: %v", err), 500)
 			return
 		}
 
+		log.Printf("Everything went ok, redirecting %v to repo\n", username)
 		redirectToRepo(w, r)
 	}
 }
