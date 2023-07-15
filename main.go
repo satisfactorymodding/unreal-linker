@@ -116,7 +116,7 @@ func handleLink(ghClientID string) http.HandlerFunc {
 
 		http.Redirect(w, r, fmt.Sprintf("https://github.com/login/oauth/authorize?%s", url.Values{
 			"client_id": []string{ghClientID},
-			"scope":     []string{string(github.ScopeRepo)},
+			"scope":     []string{string(github.ScopeReadOrg)},
 		}.Encode()), http.StatusSeeOther)
 	}
 }
@@ -163,18 +163,6 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 			return
 		}
 
-		log.Printf("Trying to accept the invitation for %v if it exists\n", username)
-		accepted, err := acceptInvitationIfPresent(client)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error trying to accept the invitation: %v", err), 500)
-			return
-		}
-		if accepted {
-			log.Printf("Was able to accept the invitation for %v, redirecting\n", username)
-			redirectToRepo(w, r)
-			return
-		}
-
 		log.Printf("Checking if %v is in the EpicGames org\n", username)
 		isInOrg, err := isUserInEpicOrg(client)
 		if err != nil {
@@ -194,13 +182,6 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 		err = sendCollaborationInvitation(appClient, username)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Could not send you an invitation: %v", err), 500)
-			return
-		}
-
-		log.Printf("Accepting the invitation for %v\n", username)
-		err = acceptInvitation(client)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error accepting the invitation: %v", err), 500)
 			return
 		}
 
@@ -232,7 +213,7 @@ func getAccessToken(code, ghClientID, ghClientSecret string) (string, error) {
 func isUserInEpicOrg(client *github.Client) (bool, error) {
 	ctx := context.Background()
 
-	_, _, err := client.Repositories.Get(ctx, "EpicGames", "UnrealEngine")
+	_, _, err := client.Teams.GetTeamBySlug(ctx, "EpicGames", "developers")
 	if err, ok := err.(*github.ErrorResponse); ok { // We rely on an implementation bug to check if the user can access a repo
 		if err.Response.StatusCode == 404 {
 			return false, nil
@@ -265,45 +246,6 @@ func hasUserRepoAccess(client *github.Client) (bool, error) {
 	}
 
 	return true, nil
-}
-
-func acceptInvitationIfPresent(client *github.Client) (bool, error) {
-	ctx := context.Background()
-	invitations, _, err := client.Users.ListInvitations(ctx, nil)
-	if err, ok := err.(*github.ErrorResponse); ok { // We rely on an implementation bug to check if the user can access a repo
-		if err.Response.StatusCode == 404 {
-			return false, nil
-		}
-	}
-	if err != nil {
-		return false, errors.Wrap(err, "error listing collaboration invitations")
-	}
-	for _, invitation := range invitations {
-		repo := *invitation.Repo
-		if strings.ToLower(*repo.Owner.Login) != "satisfactorymodding" || *repo.Name != "UnrealEngine" {
-			continue
-		}
-		_, err = client.Users.AcceptInvitation(ctx, *invitation.ID)
-		if err != nil {
-			return false, errors.Wrap(err, "error accepting collaboration invitation")
-		}
-		return true, nil
-	}
-
-	return false, nil
-}
-
-func acceptInvitation(client *github.Client) error {
-	accepted, err := acceptInvitationIfPresent(client)
-	if err != nil {
-		return err
-	}
-
-	if !accepted {
-		return errors.New("Could not find your invitation. Check your email to see if you received one.")
-	}
-
-	return nil
 }
 
 func sendCollaborationInvitation(authenticatedClient *github.Client, user string) error {
