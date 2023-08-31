@@ -170,7 +170,7 @@ func handleAuthorize(ghClientID, ghClientSecret, ghRepoOwner, ghRepoName string,
 		}
 		if hasAccess {
 			log.Printf("%v has access to repo, redirecting\n", username)
-			redirectToRepo(w, r)
+			redirectToRepo(ghRepoOwner, ghRepoName, w, r)
 			return
 		}
 
@@ -182,7 +182,7 @@ func handleAuthorize(ghClientID, ghClientSecret, ghRepoOwner, ghRepoName string,
 		}
 		if accepted {
 			log.Printf("Was able to accept the invitation for %v, redirecting\n", username)
-			redirectToRepo(w, r)
+			redirectToRepo(ghRepoOwner, ghRepoName, w, r)
 			return
 		}
 
@@ -216,7 +216,7 @@ func handleAuthorize(ghClientID, ghClientSecret, ghRepoOwner, ghRepoName string,
 		}
 
 		log.Printf("Everything went ok, redirecting %v to repo\n", username)
-		redirectToRepo(w, r)
+		redirectToRepo(ghRepoOwner, ghRepoName, w, r)
 	}
 }
 
@@ -325,6 +325,7 @@ func sendCollaborationInvitation(authenticatedClient *github.Client, ghRepoOwner
 	return err
 }
 
-func redirectToRepo(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "https://github.com/SatisfactoryModding/UnrealEngine", http.StatusSeeOther)
+func redirectToRepo(ghRepoOwner, ghRepoName string, w http.ResponseWriter, r *http.Request) {
+	redirectURL := fmt.Sprintf("https://github.com/%s/%s", ghRepoOwner, ghRepoName)
+	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }
