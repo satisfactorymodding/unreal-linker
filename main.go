@@ -31,7 +31,7 @@ func main() {
 	appClient := github.NewClient(&http.Client{Transport: appTransport})
 
 	http.HandleFunc("/link", handlePanicHTTP(handleLink(conf.GHOauthID)))
-	http.HandleFunc("/authorize", handlePanicHTTP(handleAuthorize(conf.GHOauthID, conf.GHOAuthSecret, appClient)))
+	http.HandleFunc("/authorize", handlePanicHTTP(handleAuthorize(conf.GHOauthID, conf.GHOAuthSecret, conf.GHRepoOwner, conf.GHRepoName, appClient)))
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		log.Fatal(err)
@@ -71,12 +71,20 @@ func getConfigFromEnv() (Config, error) {
 		return Config{}, errors.New("GITHUB_APP_KEY_PATH is required")
 	}
 
+	ghRepoSlug, ok := os.LookupEnv("GITHUB_REPOSITORY")
+	if !ok {
+		return Config{}, errors.New("GITHUB_REPOSITORY is required")
+	}
+	ghRepoParts := strings.SplitN(ghRepoSlug, "/", 2)
+
 	return Config{
 		GHOauthID:           ghOAuthID,
 		GHOAuthSecret:       ghOAuthSecret,
 		GHAppID:             ghAppID,
 		GHAppInstallationID: ghAppInstallationID,
 		GHAppKeyPath:        ghAppKeyPath,
+		GHRepoOwner:         ghRepoParts[0],
+		GHRepoName:          ghRepoParts[1],
 	}, nil
 }
 
@@ -87,6 +95,9 @@ type Config struct {
 	GHAppID             int64
 	GHAppInstallationID int64
 	GHAppKeyPath        string
+
+	GHRepoOwner string
+	GHRepoName  string
 }
 
 func handlePanicHTTP(handlerFunc http.HandlerFunc) http.HandlerFunc {
@@ -121,7 +132,7 @@ func handleLink(ghClientID string) http.HandlerFunc {
 	}
 }
 
-func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client) http.HandlerFunc {
+func handleAuthorize(ghClientID, ghClientSecret, ghRepoOwner, ghRepoName string, appClient *github.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		err := r.ParseForm()
@@ -152,7 +163,7 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 
 		log.Printf("Checking if %v already has repo access\n", username)
 
-		hasAccess, err := hasUserRepoAccess(client)
+		hasAccess, err := hasUserRepoAccess(ghRepoOwner, ghRepoName, client)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Error checking for repo access: %v", err), 500)
 			return
@@ -164,7 +175,7 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 		}
 
 		log.Printf("Trying to accept the invitation for %v if it exists\n", username)
-		accepted, err := acceptInvitationIfPresent(client)
+		accepted, err := acceptInvitationIfPresent(ghRepoOwner, ghRepoName, client)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Error trying to accept the invitation: %v", err), 500)
 			return
@@ -191,14 +202,14 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 		log.Printf("User %s was in the EpicGames organisation\n", username)
 
 		log.Printf("Sending invitation for %v\n", username)
-		err = sendCollaborationInvitation(appClient, username)
+		err = sendCollaborationInvitation(appClient, ghRepoOwner, ghRepoName, username)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Could not send you an invitation: %v", err), 500)
 			return
 		}
 
 		log.Printf("Accepting the invitation for %v\n", username)
-		err = acceptInvitation(client)
+		err = acceptInvitation(ghRepoOwner, ghRepoName, client)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Error accepting the invitation: %v", err), 500)
 			return
@@ -248,10 +259,10 @@ func isUserInEpicOrg(client *github.Client) (bool, error) {
 	return true, nil
 }
 
-func hasUserRepoAccess(client *github.Client) (bool, error) {
+func hasUserRepoAccess(ghRepoOwner, ghRepoName string, client *github.Client) (bool, error) {
 	ctx := context.Background()
 
-	_, _, err := client.Repositories.Get(ctx, "SatisfactoryModding", "UnrealEngine")
+	_, _, err := client.Repositories.Get(ctx, ghRepoOwner, ghRepoName)
 	if err, ok := err.(*github.ErrorResponse); ok { // We rely on an implementation bug to check if the user can access a repo
 		if err.Response.StatusCode == 404 {
 			return false, nil
@@ -267,7 +278,7 @@ func hasUserRepoAccess(client *github.Client) (bool, error) {
 	return true, nil
 }
 
-func acceptInvitationIfPresent(client *github.Client) (bool, error) {
+func acceptInvitationIfPresent(ghRepoOwner, ghRepoName string, client *github.Client) (bool, error) {
 	ctx := context.Background()
 	invitations, _, err := client.Users.ListInvitations(ctx, nil)
 	if err, ok := err.(*github.ErrorResponse); ok { // We rely on an implementation bug to check if the user can access a repo
@@ -280,7 +291,7 @@ func acceptInvitationIfPresent(client *github.Client) (bool, error) {
 	}
 	for _, invitation := range invitations {
 		repo := *invitation.Repo
-		if strings.ToLower(*repo.Owner.Login) != "satisfactorymodding" || *repo.Name != "UnrealEngine" {
+		if !strings.EqualFold(*repo.Owner.Login, ghRepoOwner) || !strings.EqualFold(*repo.Name, ghRepoName) {
 			continue
 		}
 		_, err = client.Users.AcceptInvitation(ctx, *invitation.ID)
@@ -293,8 +304,8 @@ func acceptInvitationIfPresent(client *github.Client) (bool, error) {
 	return false, nil
 }
 
-func acceptInvitation(client *github.Client) error {
-	accepted, err := acceptInvitationIfPresent(client)
+func acceptInvitation(ghRepoOwner, ghRepoName string, client *github.Client) error {
+	accepted, err := acceptInvitationIfPresent(ghRepoOwner, ghRepoName, client)
 	if err != nil {
 		return err
 	}
@@ -306,8 +317,8 @@ func acceptInvitation(client *github.Client) error {
 	return nil
 }
 
-func sendCollaborationInvitation(authenticatedClient *github.Client, user string) error {
-	_, _, err := authenticatedClient.Repositories.AddCollaborator(context.Background(), "SatisfactoryModding", "UnrealEngine", user, &github.RepositoryAddCollaboratorOptions{
+func sendCollaborationInvitation(authenticatedClient *github.Client, ghRepoOwner, ghRepoName, user string) error {
+	_, _, err := authenticatedClient.Repositories.AddCollaborator(context.Background(), ghRepoOwner, ghRepoName, user, &github.RepositoryAddCollaboratorOptions{
 		Permission: "pull",
 	})
 
