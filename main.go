@@ -176,7 +176,7 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 		}
 
 		log.Printf("Checking if %v is in the EpicGames org\n", username)
-		isInOrg, err := isUserInEpicOrg(client)
+		isInOrg, err := isUserInAnyEpicOrg(client)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("error getting org status: %v", err), 500)
 			return
@@ -229,11 +229,27 @@ func getAccessToken(code, ghClientID, ghClientSecret string) (string, error) {
 	return query.Get("access_token"), nil
 }
 
-func isUserInEpicOrg(client *github.Client) (bool, error) {
+var epicOrgs = []string{"EpicGames", "EpicGames-Mirror-A"}
+
+func isUserInAnyEpicOrg(client *github.Client) (bool, error) {
+	for _, org := range epicOrgs {
+		isInOrg, err := isUserInEpicOrg(client, org)
+		if err != nil {
+			return false, errors.Wrap(err, "error checking user's org membership")
+		}
+		if isInOrg {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func isUserInEpicOrg(client *github.Client, org string) (bool, error) {
 	ctx := context.Background()
 
-	_, _, err := client.Teams.GetTeamBySlug(ctx, "EpicGames", "developers")
-	if err, ok := err.(*github.ErrorResponse); ok { // We rely on an implementation bug to check if the user can access a repo
+	_, _, err := client.Teams.GetTeamBySlug(ctx, org, "developers")
+	if err, ok := err.(*github.ErrorResponse); ok { // We rely on an implementation bug to check if the user can access a team
 		if err.Response.StatusCode == 404 {
 			return false, nil
 		}
