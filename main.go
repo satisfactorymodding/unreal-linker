@@ -152,7 +152,7 @@ func handleAuthorize(ghClientID, ghClientSecret string, appClient *github.Client
 
 		log.Printf("Checking if %v already has repo access\n", username)
 
-		hasAccess, err := hasUserRepoAccess(client)
+		hasAccess, err := hasUserRepoAccess(appClient, username)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Error checking for repo access: %v", err), 500)
 			return
@@ -264,23 +264,15 @@ func isUserInEpicOrg(client *github.Client, org string) (bool, error) {
 	return true, nil
 }
 
-func hasUserRepoAccess(client *github.Client) (bool, error) {
+func hasUserRepoAccess(client *github.Client, username string) (bool, error) {
 	ctx := context.Background()
 
-	_, _, err := client.Repositories.Get(ctx, "SatisfactoryModding", "UnrealEngine")
-	if err, ok := err.(*github.ErrorResponse); ok { // We rely on an implementation bug to check if the user can access a repo
-		if err.Response.StatusCode == 404 {
-			return false, nil
-		}
-		if err.Response.StatusCode == 403 {
-			return true, nil
-		}
-	}
+	isCollaborator, _, err := client.Repositories.IsCollaborator(ctx, "SatisfactoryModding", "UnrealEngine", username)
 	if err != nil {
 		return false, errors.Wrap(err, "error checking user's repo access")
 	}
 
-	return true, nil
+	return isCollaborator, nil
 }
 
 func acceptInvitationIfPresent(client *github.Client) (bool, error) {
