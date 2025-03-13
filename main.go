@@ -308,7 +308,7 @@ func acceptInvitation(client *github.Client) error {
 	}
 
 	if !accepted {
-		return errors.New("Could not find your invitation. Check your email to see if you received one.")
+		return errors.New("Could not find your invitation. Check your email to see if you received one. Also, check if you already have access to the custom engine repository (https://github.com/satisfactorymodding/UnrealEngine), in which case your account is already linked and you don't need to use the linker.")
 	}
 
 	return nil
