@@ -27,8 +27,16 @@ func main() {
 	logger := log.Default()
 	logger.SetFlags(log.Ltime | log.Ldate | log.LUTC)
 
-	appTransport, err := ghinstallation.NewKeyFromFile(http.DefaultTransport, conf.GHAppID, conf.GHAppInstallationID, conf.GHAppKeyPath)
-	appClient := github.NewClient(&http.Client{Transport: appTransport})
+	var appClient *github.Client
+	if conf.GHToken != "" {
+		appClient = github.NewTokenClient(context.Background(), conf.GHToken)
+	} else {
+		appTransport, err := ghinstallation.NewKeyFromFile(http.DefaultTransport, conf.GHAppID, conf.GHAppInstallationID, conf.GHAppKeyPath)
+		if err != nil {
+			log.Fatalf("Error creating GitHub App transport: %v", err)
+		}
+		appClient = github.NewClient(&http.Client{Transport: appTransport})
+	}
 
 	http.HandleFunc("/link", handlePanicHTTP(handleLink(conf.GHOauthID)))
 	http.HandleFunc("/authorize", handlePanicHTTP(handleAuthorize(conf.GHOauthID, conf.GHOAuthSecret, appClient)))
@@ -41,43 +49,46 @@ func main() {
 func getConfigFromEnv() (Config, error) {
 	_ = godotenv.Load()
 
-	ghOAuthID, ok := os.LookupEnv("GITHUB_OAUTH_ID")
+	config := Config{}
+
+	var ok bool
+
+	config.GHOauthID, ok = os.LookupEnv("GITHUB_OAUTH_ID")
 	if !ok {
 		return Config{}, errors.New("GITHUB_OAUTH_ID is required")
 	}
-	ghOAuthSecret, ok := os.LookupEnv("GITHUB_OAUTH_SECRET")
+	config.GHOAuthSecret, ok = os.LookupEnv("GITHUB_OAUTH_SECRET")
 	if !ok {
 		return Config{}, errors.New("GITHUB_OAUTH_SECRET is required")
 	}
-	ghAppIDStr, ok := os.LookupEnv("GITHUB_APP_ID")
+
+	config.GHToken, ok = os.LookupEnv("GITHUB_TOKEN")
 	if !ok {
-		return Config{}, errors.New("GITHUB_APP_ID is required")
-	}
-	ghAppID, err := strconv.ParseInt(ghAppIDStr, 0, 64)
-	if err != nil {
-		return Config{}, errors.New("GITHUB_APP_ID is not a valid int64")
-	}
-	ghInstallationIDStr, ok := os.LookupEnv("GITHUB_INSTALLATION_ID")
-	if !ok {
-		return Config{}, errors.New("GITHUB_INSTALLATION_ID is required")
-	}
-	ghAppInstallationID, err := strconv.ParseInt(ghInstallationIDStr, 0, 64)
-	if err != nil {
-		return Config{}, errors.New("GITHUB_INSTALLATION_ID is not a valid int64")
+		var err error
+		ghAppIDStr, ok := os.LookupEnv("GITHUB_APP_ID")
+		if !ok {
+			return Config{}, errors.New("GITHUB_APP_ID is required")
+		}
+		config.GHAppID, err = strconv.ParseInt(ghAppIDStr, 0, 64)
+		if err != nil {
+			return Config{}, errors.New("GITHUB_APP_ID is not a valid int64")
+		}
+		ghInstallationIDStr, ok := os.LookupEnv("GITHUB_INSTALLATION_ID")
+		if !ok {
+			return Config{}, errors.New("GITHUB_INSTALLATION_ID is required")
+		}
+		config.GHAppInstallationID, err = strconv.ParseInt(ghInstallationIDStr, 0, 64)
+		if err != nil {
+			return Config{}, errors.New("GITHUB_INSTALLATION_ID is not a valid int64")
+		}
+
+		config.GHAppKeyPath, ok = os.LookupEnv("GITHUB_APP_KEY_PATH")
+		if !ok {
+			return Config{}, errors.New("GITHUB_APP_KEY_PATH is required")
+		}
 	}
 
-	ghAppKeyPath, ok := os.LookupEnv("GITHUB_APP_KEY_PATH")
-	if !ok {
-		return Config{}, errors.New("GITHUB_APP_KEY_PATH is required")
-	}
-
-	return Config{
-		GHOauthID:           ghOAuthID,
-		GHOAuthSecret:       ghOAuthSecret,
-		GHAppID:             ghAppID,
-		GHAppInstallationID: ghAppInstallationID,
-		GHAppKeyPath:        ghAppKeyPath,
-	}, nil
+	return config, nil
 }
 
 type Config struct {
@@ -87,6 +98,8 @@ type Config struct {
 	GHAppID             int64
 	GHAppInstallationID int64
 	GHAppKeyPath        string
+
+	GHToken string
 }
 
 func handlePanicHTTP(handlerFunc http.HandlerFunc) http.HandlerFunc {
